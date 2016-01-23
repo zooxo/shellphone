@@ -4,5 +4,7 @@ It runs a small (uClibc) busybox linux - very hardware independent. Software is 
 This side provides shell scripts to manage this operating system.
 
 For easy operating of this small gadget only six (!) keys are necessary (similar to a small remote control):
+
  UP, DOWN, LEFT, RIGHT, OK and KO.
+
 Of course for purposes of programming a keyboard connection or ssh-input is possible.
