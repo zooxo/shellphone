@@ -8,3 +8,4 @@ For easy operating of this small gadget only six (!) keys are necessary (similar
  UP, DOWN, LEFT, RIGHT, OK and KO.
 
 Of course for purposes of programming a keyboard connection or ssh-input is possible.
+Test

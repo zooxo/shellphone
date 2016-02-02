@@ -1,0 +1,618 @@
+#!/bin/busybox sh
+# Tiny explorer, v0.1, 2013, by deetee
+# Console file manager, written as shell script for ash (busybox)
+# Including tcalc (RPN-calculator) and tslide (text slide show)
+
+
+### INCLUDE FILES
+HEADERDIR="/etc/headers"
+source $HEADERDIR/global-variables
+source $HEADERDIR/key-query
+
+
+### LOCAL VARIABLES
+MAXROW=$(stty size | cut -d" " -f1); MAXCOL=$(stty size | cut -d" " -f2)
+EDITOR="vi"
+TITLECOLOR=$FGBLACK$BGCYAN; PANCOLOR=$FGWHITE$BGBLUE
+BARCOLOR=$FGBLACK$BGCYAN;CHOOSECOLOR=$EBOLD$FGBROWN$BGBLUE
+STATUSCOLOR=$EBOLD$FGWHITE$BGGREEN; HELPCOLOR=$FGBLACK$BGWHITE
+MESSAGECOLOR=$FGWHITE$BGRED; MENUCOLOR=$EBOLD$FGWHITE$BGMAGENTA
+COL1=1; COL2=41; ROW1=1; ROW2=1
+MAXFILELIST=8
+STATUSLINE=$(($MAXFILELIST + 2))
+CLEARSTRING="                                        "
+
+PREC=15
+
+CALCPANROW=5; CALCINPUTROW=9; CALCHELPROW=1
+CALCPANCOLOR=$EBOLD$FGWHITE$BGBLUE; CALCINPUTCOLOR=$EBOLD$FGBROWN$BGBLACK
+
+slide=1; SHOWHELP=1
+SLIDEFGCOLOR=$FGBROWN; SLIDEBGCOLOR=$BGBLUE; SLIDEEFFECT=$EBOLD
+
+
+### SUBPROGRAMS
+_help(){ # help
+ echo -n "$CSI$ROW1;1H$HELPCOLOR"
+ echo "___TINY__EXPLORER___"
+ echo " This help:   1,h,? "
+ echo " User menu:     2,u "
+ echo " Cat/edit:  3,l/4,e "
+ echo " Copy/move: 5,c/6,m "
+ echo " Rename/del:  7,r/8 "
+ echo " Make_dir/do:  9,11 "
+ echo " Exit:   0,q,ESCESC "
+ echo " Move: cursr,'asdw' "
+ echo " Switch pan: TAB,BS "
+ echo " Shell:       SPACE "
+ echo " Execute:     ENTER "
+ echo "__v0.1_2013_deetee__"
+ echo $ERESET
+ read -n1 -s DUMMY
+}
+
+_print_helpline(){ # help in statusline
+ echo -n "${CSI}$STATUSLINE;1H$TITLECOLOR"
+ echo "1_help  2_menu  3_cat  4_edit  5_cp  6_mv  7_ren  8_del  9_mkdir  10_exit  11_do"
+ echo $ERESET
+}
+
+_menu(){ # special user menu
+ echo -n "${CSI}1;1H"$MENUCOLOR
+ echo "____USER_MENU____"
+ echo "1 system status  "
+ echo "2 RPN-calculator "
+ echo "3 text slide     "
+ echo $ERESET
+ _get_key
+ case "$_KEY" in
+  1) _print_status ;;
+  2) echo $CURON; _tcalc; echo $CUROFF ;;
+  3) _tslide ;;
+ esac
+}
+
+_print_status(){ # print status
+ echo -n "${CSI}$STATUSLINE;1H$STATUSCOLOR$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$STATUSLINE;1H"
+ echo -n " " # system size used/total
+ df -k /home | tail -1 | awk '{printf "disk%2.1f%%",$3/$2*100}'
+ echo -n " " # mem
+ free -b | head -2 | tail -1 | awk '{printf "mem%2.1f%%",$3/$2*100}'
+ echo -n " " # cpu
+ top -b -n 1 | head -2 | tail -1 | awk '{printf "cpu%s",$2}'
+ echo -n " " # time
+ date '+date%Y-%m-%d time%H:%M '
+ read -n1 -s DUMMY
+ echo $ERESET
+}
+
+_copy_file(){ # copy file
+ if [ $PAN -eq 1 ]; then
+  if [ -e $PATH2/$CHOSENFILE ]; then
+   MESSAGE="Really overwrite $CHOSENFILE (y)?"; _message_wait
+   if [ $ANSWER == y ]; then cp -R $PATH0/$CHOSENFILE $PATH2; fi
+  else cp -R $PATH0/$CHOSENFILE $PATH2; FILECOUNT2=$(ls -A $PATH2 | wc -w)
+  fi
+ else
+  if [ -e $PATH1/$CHOSENFILE ]; then
+   MESSAGE="Really overwrite $CHOSENFILE (y)?"; _message_wait
+   if [ $ANSWER == y ]; then cp $PATH0/$CHOSENFILE $PATH1; fi
+  else cp $PATH0/$CHOSENFILE $PATH1; FILECOUNT1=$(ls -A $PATH1 | wc -w)
+  fi
+ fi
+}
+
+_move_file(){ # move file
+ if [ $PAN -eq 1 ]; then
+  if [ -e $PATH2/$CHOSENFILE ]; then
+   MESSAGE="Really overwrite $CHOSENFILE (y)?"; _message_wait
+   if [ $ANSWER == y ]; then mv -f $PATH0/$CHOSENFILE $PATH2; fi
+  else mv $PATH0/$CHOSENFILE $PATH2
+  fi
+  FILECOUNT=$(ls -A $PATH1 | wc -w); FILECOUNT1=$FILECOUNT
+ else
+  if [ -e $PATH1/$CHOSENFILE ]; then
+   MESSAGE="Really overwrite $CHOSENFILE (y)?"; _message_wait
+   if [ $ANSWER == y ]; then mv -f $PATH0/$CHOSENFILE $PATH1; fi
+  else mv $PATH0/$CHOSENFILE $PATH1
+  fi
+  FILECOUNT=$(ls -A $PATH2 | wc -w); FILECOUNT2=$FILECOUNT
+ fi
+}
+
+_rename_file(){ # rename file
+ MESSAGE="Rename $CHOSENFILE to: "; _message
+ echo -n $CURON; read NEWNAME; echo $CUROFF
+ if [ -e $PATH0/$NEWNAME ]; then
+  MESSAGE="Really overwrite $NEWNAME (y)?"; _message_wait
+  if [ $ANSWER == y ]; then mv $PATH0/$CHOSENFILE $PATH0/$NEWNAME; fi
+ else mv $PATH0/$CHOSENFILE $PATH0/$NEWNAME
+ fi
+}
+
+_delete_file(){ # del
+ if [ -z != $CHOSENFILE ]; then
+  MESSAGE="Really delete $CHOSENFILE (y)?"; _message_wait
+  if [ $ANSWER == y ]; then rm -R $PATH0/$CHOSENFILE; fi
+ fi
+ FILECOUNT=$(ls -A $PATH0 | wc -w);
+ if [ $PAN -eq 1 ]; then FILECOUNT1=$FILECOUNT; else FILECOUNT2=$FILECOUNT; fi
+}
+
+_make_dir(){ # mkdir
+ MESSAGE="Make directory: "; _message
+ echo -n $CURON; read NEWDIR; echo $CUROFF
+ if [ -e $PATH0/$NEWDIR ]; then
+  MESSAGE="File exists"; _message_wait
+ else mkdir $PATH0/$NEWDIR
+ fi
+}
+
+_do_something(){ # do somethng with current file
+ MESSAGE="Do what with $CHOSENFILE:"; _message
+ echo -n $CURON; echo -n ' '; read DOWHAT; echo -n $CUROFF
+ echo -n $ERESET$CURON
+ $DOWHAT $PATH0/$CHOSENFILE
+ echo -n $CUROFF
+}
+
+_switch_panel(){ # switch panel
+ if [ $PAN -eq 1 ];
+ then PAN=2
+  FILENR1=$FILENR; FILENR=$FILENR2; FILECOUNT=$FILECOUNT2
+  PATH1=$PATH0; PATH0=$PATH2
+  FILECHOOSE1=$FILECHOOSE; FILECHOOSE=$FILECHOOSE2;
+  CURLINE1=$CURLINE; CURLINE=$CURLINE2
+ else PAN=1
+  FILENR2=$FILENR; FILENR=$FILENR1; FILECOUNT=$FILECOUNT1
+  PATH2=$PATH0; PATH0=$PATH1
+  FILECHOOSE2=$FILECHOOSE; FILECHOOSE=$FILECHOOSE1;
+  CURLINE2=$CURLINE; CURLINE=$CURLINE1
+ fi
+}
+
+_scroll_down(){ # scroll down
+ if [ $FILENR -le $(($FILECOUNT - $MAXFILELIST)) ]; then
+  FILENR=$(($FILENR + 1))
+ fi
+ if [ $FILECHOOSE -lt $FILECOUNT ]; then
+  FILECHOOSE=$(($FILECHOOSE + 1))
+ fi
+ if [ $(($FILECHOOSE - $FILENR)) -gt $CURLINE ]; then
+  CURLINE=$(($FILECHOOSE - $FILENR))
+ fi
+}
+
+_page_down(){ # page down
+ i=0
+ while :; do
+  if [ $i -ge $MAXFILELIST ]; then break; fi
+  _scroll_down; i=$(($i + 1))
+ done
+}
+
+_scroll_up(){ # scroll up
+ if [ $FILENR -gt 1 ]; then FILENR=$(($FILENR - 1)); fi
+ if [ $FILECHOOSE -gt 1 ]; then FILECHOOSE=$(($FILECHOOSE - 1)); fi
+ if [ $FILENR -le 1 ]; then CURLINE=$(($FILECHOOSE - $FILENR)); fi
+}
+
+_page_up(){ # page up
+ i=0
+ while :; do
+  if [ $i -ge $MAXFILELIST ]; then break; fi
+  _scroll_up; i=$(($i + 1))
+ done
+}
+
+_change_dir_up(){ # cd ..
+ cd $PATH0; cd ..;
+ PATH0=$(pwd); FILECOUNT=$(ls -A $PATH0 | wc -w)
+ FILENR=1; FILECHOOSE=1; CURLINE=0
+ if [ $PAN -eq 1 ]; then PATH1=$PATH0; FILECOUNT1=$FILECOUNT; FILENR1=$FILENR
+ else PATH2=$PATH0; FILCOUNT2=$FILECOUNT; FILENR2=$FILENR
+ fi
+}
+
+_change_dir_down(){ # change to dir
+ if [ $PATH0 == / ]; then cd /$CHOSENFILE; else cd $PATH0/$CHOSENFILE; fi
+ PATH0=$(pwd); FILECOUNT=$(ls -A $PATH0 | wc -w); FILENR=1; FILECHOOSE=1
+ if [ $PAN -eq 1 ]; then
+  PATH1=$PATH0; FILECOUNT1=$FILECOUNT; FILENR1=$FILENR; FILECOOSE1=$FILECHOOSE
+  CURLINE1=$CURLINE; CURLINE=0
+ else
+  PATH2=$PATH0; FILECOUNT2=$FILECOUNT; FILENR2=$FILENR; FILECOOSE2=$FILECHOOSE
+  CURLINE2=$CURLINE; CURLINE=0
+ fi
+}
+_execute_shell(){ # shell
+ MESSAGE="Leave shell with \"exit\""; _message
+ echo $ERESET
+ if [ $PAN -eq 1 ]; then cd $PATH1; else cd $PATH2; fi
+ sh
+}
+
+_message(){ # print MESSAGE
+ echo -n "${CSI}$STATUSLINE;1H$MESSAGECOLOR$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$STATUSLINE;1H$MESSAGE"
+}
+
+_message_wait(){ # print MESSAGE, wait for keypress
+ _message; _get_key; ANSWER=$_KEY
+ echo $ERESET
+}
+
+_print_bar(){ # print chosen bar, eval. chosen file and dir
+ if [ $PAN -eq 1 ]; then
+  echo -n "${CSI}$(($ROW1 + $CURLINE + 1));$(($COL1 + 3))H$CHOOSECOLOR"
+  PATH0=$PATH1
+ else
+  echo -n "${CSI}$(($ROW2 + $CURLINE + 1));$(($COL2 + 3))H$CHOOSECOLOR"
+  PATH0=$PATH2
+ fi
+ CHOSENFILE=$( (ls -lAh $PATH0 | grep "^d" ; ls -lAh $PATH0 | grep "^-" ;
+  ls -Al | grep -E "^d|^-" -v | grep -v "^total") | 
+  awk '{ print $9;}' | head -$FILECHOOSE | tail -1)
+ echo -n $CHOSENFILE | cut -c1-29
+ CHOSENDIR=$( (ls -lA $PATH0 | grep "^d" ; ls -lA $PATH0 | grep "^-") |
+  awk '{ print substr($1,1,1);}' | head -$FILECHOOSE | tail -1)
+ echo -n $ERESET
+}
+
+_print_path(){ # print title lines
+ if [ $PAN -eq 1 ]; then
+  echo -n "${CSI}$ROW1;${COL1}H$TITLECOLOR$CLEARSTRING"
+  echo -n "${CSI}$ROW1;${COL1}H"; echo -n $PATH1 | cut -c1-40
+  echo -n "${CSI}$ROW2;${COL2}H$PANCOLOR$CLEARSTRING"
+  echo -n "${CSI}$ROW2;${COL2}H"; echo -n $PATH2 | cut -c1-40
+ else
+  echo -n "${CSI}$ROW1;${COL1}H$PANCOLOR$CLEARSTRING"
+  echo -n "${CSI}$ROW1;${COL1}H"; echo -n $PATH1 | cut -c1-40
+  echo -n "${CSI}$ROW2;${COL2}H$TITLECOLOR$CLEARSTRING"
+  echo -n "${CSI}$ROW2;${COL2}H"; echo -n $PATH2 | cut -c1-40
+ fi
+}
+
+_clear_pan(){
+ echo -n $PANCOLOR
+ i=1
+ if [ $PAN -eq 1 ]; then
+  while :; do
+   if [ $i -ge $(($MAXFILELIST + 1)) ]; then break; fi
+   echo -n "${CSI}$(($ROW1 + i));${COL1}H$CLEARSTRING"; i=$(($i + 1))
+  done
+ else
+  while :; do
+   if [ $i -ge $(($MAXFILELIST + 1)) ]; then break; fi
+   echo -n "${CSI}$(($ROW2 + i));${COL2}H$CLEARSTRING"; i=$(($i + 1))
+  done
+ fi
+}
+
+_print_pan1(){
+ echo -n $PANCOLOR
+ echo -n "${CSI}$(($ROW1 + 1));${COL1}H"
+ (ls -lAh $PATH1 | grep "^d" ; ls -lAh $PATH1 | grep "^-"
+  ls -Al $PATH1 | grep -E "^d|^-" -v | grep -v "^total") |
+  awk '{ printf " %s %-29s %6s \n",substr($1,1,1),substr($9,1,29),$5;}' |
+  head -$(($FILENR + $MAXFILELIST - 1)) | tail -$MAXFILELIST
+}
+
+_print_pan2(){ # clear pan 2 and ls
+ echo -n $PANCOLOR
+ echo -n "${CSI}$(($ROW2 + 1));${COL1}H"
+ (ls -lAh $PATH2 | grep "^d" ; ls -lAh $PATH2 | grep "^-"
+  ls -Al $PATH2 | grep -E "^d|^-" -v | grep -v "^total") |
+  awk '{ printf "\t\t\t\t\t %s %-29s %6s \n",substr($1,1,1),substr($9,1,29),$5;}' |
+  head -$(($FILENR + $MAXFILELIST - 1)) | tail -$MAXFILELIST
+}
+
+
+_print(){ # print actual pan and status
+ _print_path
+ if [ $PAN -eq 1 ]; then _print_pan1
+ else _print_pan2; fi
+ _print_bar; _print_helpline
+}
+
+_print_all(){ # print all
+ _print_path; _clear_pan;_print_pan1; _clear_pan; _print_pan2
+}
+
+
+### TSLIDE
+_help_slide(){ # help
+ echo -n "${CSI}$ROW1;1H$HELPCOLOR"
+ echo " Present textfiles "
+ echo "__(named_00...99)__"
+ echo " This help:  1,h,? "
+ echo " Prev:    2,-,p,UP "
+ echo " Next:  3,_,+,n,DN "
+ echo " Edit file:    4,v "
+ echo " FG color:     5,f "
+ echo " BG color:     6,b "
+ echo " Effect:       7,e "
+ echo " Delete file:    8 "
+ echo " Goto:         9,g "
+ echo " Exit:  0,q,ESCESC "
+ echo "_Infoline:____11,i_"
+ echo $ERESET
+ read -n1 -s DUMMY
+}
+
+_print_slide_helpline(){ # help in statusline
+ echo -n "${CSI}$MAXROW;1H$TITLECOLOR"
+ echo -n "1_hlp  2_prev  3_nxt  4_edit  5_FG  6_BG  7_fx  8_del  9_gto  10_exit  11_info"
+ echo -n "${CSI}$MAXROW;$(($MAXCOL - 1))H"
+ if [ $slide -le 9 ]; then echo -n 0$slide; else echo -n $slide; fi
+ echo -n $ERESET
+}
+
+_choosecol(){ # choose color
+ echo -n "${CSI}$ROW1;1H$HELPCOLOR"
+ echo "__Set_color___"
+ echo "0 black       "
+ echo "1 red         "
+ echo "2 green       "
+ echo "3 brown       "
+ echo "4 blue        "
+ echo "5 magenta     "
+ echo "6 cyan        "
+ echo "7 white       "
+ echo "_Your_choice:_"
+ echo $ERESET
+ read -n1 COLOR
+}
+
+_chooseeffect(){
+ echo -n "${CSI}$ROW1;1H$HELPCOLOR"
+ echo "__Set_effect__"
+ echo "0 reset       "
+ echo "1 bold        "
+ echo "5 blink       "
+ echo "7 reverse     "
+ echo "_Your_choice:_"
+ echo $ERESET
+ read -n1 EFFECT
+}
+
+_print_slide(){ # cat file
+ echo -n $SLIDEEFFECT$SLIDEFGCOLOR$SLIDEBGCOLOR; clear
+ if [ $slide -le 9 ]; then cat $PATH0/0$slide | more; else cat $PATH0/$slide | more; fi
+ echo $ERESET
+}
+
+_tslide(){ # Text slide show called from user menu
+i=0; _print_slide
+
+while :
+do
+ if [ $SHOWHELP -eq 1 ]; then _print_slide_helpline; fi
+ _get_key
+
+ case "$_KEY" in
+  [0-9]) i=$(($i * 10)); i=$(($i + $_KEY)) ;; # collect number for goto
+
+  'F1'|[hH?]) _help_slide; _print_slide ;; # help
+
+  'F2'|'PGUP'|'UP'|[-pPwW]) # prev slide
+   if [ $slide -le 1 ]; then slide=$(($slide + 1)); fi
+   slide=$(($slide - 1)); _print_slide; i=0 ;;
+
+  'F3'|'SPACE'|'ENTER'|'PGDN'|'DOWN'|[+nNsS]) # next slide
+   if [ $slide -ge 99 ]; then slide=$(($slide - 1)); fi
+   slide=$(($slide + 1)); _print_slide; i=0 ;;
+
+  'F4'|v) echo $CURON # edit
+   if [ $slide -le 9 ]; then $EDITOR 0$slide; else $EDITOR $slide; fi
+   _print_slide; i=0; echo $CUROFF ;;
+
+  'F5'|f) _choosecol # foreground color
+   SLIDEFGCOLOR=${CSI}3${COLOR}m; _print_slide; i=0 ;;
+
+  'F6'|b) _choosecol # background color
+   SLIDEBGCOLOR=${CSI}4${COLOR}m; _print_slide; i=0 ;;
+
+  'F7'|e) _chooseeffect # effect
+   SLIDEEFFECT=${CSI}${EFFECT}m; _print_slide; i=0 ;;
+
+  'F8') if [ $slide -le 9 ]; then rm 0$slide; else rm $slide; fi # del slide
+   _print_slide; i=0 ;;
+
+  'F9'|[gG]) if [ $i -le 0 ]; then i=1; fi # goto slide
+   slide=$i; _print_slide; i=0 ;;
+
+  'F11'|i|I) if [ $SHOWHELP -eq 1 ]; then SHOWHELP=0; else SHOWHELP=1;
+    fi; _print_slide ;; # helpline
+
+  q|Q|'F10'|'ESC') break ;;
+
+  *) i=0 ;;
+ esac
+done
+}
+
+
+### TCALC
+_help_tcalc(){ # help
+ echo -n "${CSI}$CALCHELPROW;1H$HELPCOLOR"
+ echo " Q_sqr/sqrt    E_ee       R_rot>/<   T_tan/arc  I_invert   P_pi/pwr             "
+ echo " A_annu        S_sin/arc  D_deg/rad  F_fix/sci  G_gamma!   K_log/10^x  L_ln/exp "
+ echo " X_swap        C_cos/arc  V_sinh/ar  B_cosh/ar  N_tanh/ar  M_rcl/sto            "
+ echo " F10,ESC_exit  BKSPC_clx  DEL_clr    SPC_chs                                    "
+ echo $ERESET
+}
+
+_print_tcalc_helpline(){ # help in statusline
+ echo -n "${CSI}$STATUSLINE;1H$TITLECOLOR"
+ echo " 1_+  2_-  3_*  4_/  5_sqr  6_sqrt  7_1/x  8_y^x  9_PI  10_exit  11_STO  12_RCL "
+ echo $ERESET
+}
+
+_print_stack(){
+ echo -n $CALCPANCOLOR
+ echo -n "${CSI}$CALCPANROW;1H$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$(($CALCPANROW + 1));1H$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$(($CALCPANROW + 2));1H$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$(($CALCPANROW + 3));1H$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$CALCPANROW;1H"
+ if [ $FMT -lt 100 ]; then
+  echo " $U $Z $Y $X" |
+   awk '{printf " %.'''$FMT'''f\n %.'''$FMT'''f\n %.'''$FMT'''f\n %.'''$FMT'''f\n",$1,$2,$3,$4}'
+ else
+  echo " $U $Z $Y $X" | awk '{printf " %e\n %e\n %e\n %e\n",$1,$2,$3,$4}'
+ fi
+ echo -n $ERESET
+}
+
+_print_string(){
+ echo -n "$CALCINPUTCOLOR${CSI}$CALCINPUTROW;1H$CLEARSTRING$CLEARSTRING"
+ echo -n "${CSI}$CALCINPUTROW;1H $STRING"
+ echo -n $ERESET
+}
+
+_push(){ # push string to stack
+ U=$Z; Z=$Y; Y=$X; X=$STRING; STRING=''
+}
+
+_tcalc(){ # RPN-calculator called from user menu
+PI=3.141592653589793238462643
+STRING=""
+FMT=4; STO=0
+X=0; Y=0; Z=0; U=0; TMP=0
+RAD=$( awk 'BEGIN{ print '''$PI'''/180;}' )
+
+_help_tcalc; _print_stack
+_print_tcalc_helpline; _print_string
+
+while :
+do
+ _get_key
+
+ case "$_KEY" in
+  [0-9,.eE]) # add number to string
+   if [ $_KEY == ',' ]; then _KEY='.'; fi
+   STRING=$STRING$_KEY; _print_string ;;
+  'BACKSPACE'|'TAB') # del X or last string char
+   if [ -z $STRING ]; then X=$Y; Y=$Z; Z=$U;
+   else STRING=${STRING%?}; fi ;; #_print_string; fi ;;
+  'ENTER') U=$Z; Z=$Y; Y=$X # push stack
+   if [ ! -z $STRING ]; then X=$STRING; STRING=''; fi ;;
+  'F10'|'ESC') break ;;
+
+  *) # no string input - other operation
+   if [ ! -z $STRING ]; then _push; fi
+
+   case "$_KEY" in
+    +|'F1') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$X'''+'''$Y''';}' ); Y=$Z; Z=$U; STRING='' ;;
+    -|'F2') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$Y'''-'''$X''';}' ); Y=$Z; Z=$U; STRING='' ;;
+    '*'|'F3') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$X'''*'''$Y''';}' ); Y=$Z; Z=$U; STRING='' ;;
+    /|'F4') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$Y'''/'''$X''';}' ); Y=$Z; Z=$U; STRING='' ;;
+    'SPACE') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",-1*'''$X''';}' ) ;;
+    'DEL') X=0; Y=0; Z=0; U=0 ;;
+    b) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",(exp('''$X''')+exp(-'''$X'''))/2;}' ) ;;
+    B) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",log('''$X'''+sqrt('''$X'''*'''$X'''-1));}' ) ;;
+
+    a) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",((1-1/exp('''$X'''*log(1+'''$Y''')))/'''$Y''');}' ) ;;
+    c) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",cos('''$X'''*'''$RAD''');}' ) ;;
+    C) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",('''$PI'''/2-atan2('''$X'''/(sqrt(1-'''$X'''*'''$X''')),1))/'''$RAD''';}' ) ;;
+    d) RAD=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$PI'''/180;}' ) ;;
+    D) RAD=1 ;;
+    f) if [ $X -le $(($PREC - 2)) ]; then FMT=$X; else FMT=$(($PREC - 2)); fi; X=$Y; Y=$Z; Z=$U ;;
+    F) FMT=100 ;;
+    g) i=1; TMP=1; X=$( awk 'BEGIN{ print int('''$X''');}' )
+     while :; do
+      if [ $i -gt $X ]; then break; fi
+      TMP=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$TMP'''*'''$i''';}' )
+      i=$(($i + 1))
+     done; X=$TMP ;;
+    i|'F7') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",1/'''$X''';}' ) ;;
+    k) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",log('''$X''')/log(10);}' ) ;;
+    K) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",exp('''$X'''*log(10));}' ) ;;
+    l) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",log('''$X''');}' ) ;;
+    L) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",exp('''$X''');}' ) ;;
+    m|'F12') U=$Z; Z=$Y; Y=$X; X=$STO ;;
+    M|'F11') STO=$X ;;
+    n) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",(exp('''$X''')-exp(-'''$X'''))/(exp('''$X''')+exp(-'''$X'''));}' ) ;;
+    N) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",log(sqrt((1+'''$X''')/(1-'''$X''')));}' ) ;;
+    q|'F5') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",'''$X'''*'''$X''';}' ) ;;
+    Q|'F6') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",sqrt('''$X''');}' ) ;;
+    p|'F9') U=$Z; Z=$Y; Y=$X; X=$PI ;;
+    P|'F8') X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",exp('''$X'''*log('''$Y'''));}' ); Y=$Z; Z=$U ;;
+    r) TMP=$X; X=$Y; Y=$Z; Z=$U; U=$TMP ;;
+    R) TMP=$U; U=$Z; Z=$Y; Y=$X; X=$TMP ;;
+    s) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",sin('''$X'''*'''$RAD''');}' ) ;;
+    S) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",atan2('''$X'''/(sqrt(1-'''$X'''*'''$X''')),1)/'''$RAD''';}' ) ;;
+    t) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",sin('''$X'''*'''$RAD''')/cos('''$X'''*'''$RAD''');}' ) ;;
+    T) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",atan2('''$X''',1)/'''$RAD''';}' ) ;;
+    x) TMP=$X; X=$Y; Y=$TMP ;;
+    v) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",(exp('''$X''')-exp(-'''$X'''))/2;}' ) ;;
+    V) X=$( awk 'BEGIN{ printf "%.'''$PREC'''f",log('''$X'''+sqrt('''$X'''*'''$X'''+1));}' ) ;;
+   esac ;;
+
+ esac
+ _print_stack; _print_string
+done
+echo $ERESET
+}
+
+
+### MAIN PROGRAM
+PAN=1
+FILENR1=1; FILENR2=1; FILENR=1
+CURLINE1=0; CURLINE2=0; CURLINE=0
+FILECHOOSE1=1; FILECHOOSE2=1; FILECHOOSE=1
+PATH1=$(pwd); PATH2="/"; PATH0=$PATH1
+FILECOUNT1=$(ls -A $PATH1 | wc -w); FILECOUNT2=$(ls -A $PATH2 | wc -w)
+FILECOUNT=$FILECOUNT1
+
+_print_all
+echo $CUROFF
+
+while :
+do
+ _print
+ _get_key
+
+ case "$_KEY" in
+  'TAB'|'BACKSPACE') _switch_panel ;; # switch panel
+
+  'DOWN'|s|S) _scroll_down ;; # scroll down
+  'PGDN') _page_down ;; # scroll page down
+  'UP'|w|W) _scroll_up ;; # scroll up
+  'PGUP') _page_up ;; # scroll page up
+
+  'HOME') FILENR=1; FILECHOOSE=1; CURLINE=0 ;; # BOL
+  'END') FILENR=$(($FILECOUNT - $MAXFILELIST + 1)) # EOL
+   if [ $FILENR -lt 1 ]; then FILENR=1; fi
+   FILECHOOSE=$FILECOUNT; CURLINE=$(($MAXFILELIST - 1))
+   if [ $FILECOUNT -lt $MAXFILELIST ]; then CURLINE=$(($FILECOUNT - 1)); fi ;;
+
+  'LEFT'|a|A|<) _clear_pan; _change_dir_up; ;; # cd ..
+  'RIGHT'|d|D|>) if [ $CHOSENDIR == d ]; then # cd
+    _clear_pan; _change_dir_down; fi ;;
+
+  'F1'|1|h|H|'?') _help; _print_all ;; # help
+  'F2'|2|u|U) _menu; _print_all ;; # menu
+  'F3'|3|l|L) cat $CHOSENFILE | less; _print_all ;; # cat
+  'F4'|4|e|E) echo $CURON; $EDITOR $CHOSENFILE; echo $CUROFF; _print_all ;; # edit
+  'F5'|5|c|C) _copy_file; _print_all; ;; # copy
+  'F6'|6|m|M) _move_file; _print_all; ;; # move
+  'F7'|7|r|R) _rename_file; _print_all; ;; # rename
+  'F8'|8) _delete_file; _print_all ;; # delete
+  'F9'|9) _make_dir; _print_all; ;; # mkdir
+  'F11') _do_something; _print_all ;; # do smthg with file
+
+  'SPACE') echo $CURON; _execute_shell; echo $CUROFF;_print_all ;; # shell
+
+  'ENTER'|x|X) if [ $CHOSENDIR == d ]; then # cd or execute
+    _clear_pan; _change_dir_down
+   else ./$CHOSENFILE; _print_all
+   fi ;;
+
+  q|Q|0|'F10'|'ESC') break ;;
+ esac
+done
+echo $CURON
+

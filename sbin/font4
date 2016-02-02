@@ -1,0 +1,4 @@
+#!/bin/busybox sh
+# Set console font
+
+setfont /usr/share/consolefonts/Lat15-TerminusBold22x11.psf.gz

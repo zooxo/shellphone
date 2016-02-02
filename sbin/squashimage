@@ -1,0 +1,5 @@
+#!/bin/busybox sh
+
+find . | cpio -H newc -o > ../initramfs.cpio
+cat initramfs.cpio | gzip -9 > initrd.gz
+rm initramfs.cpio

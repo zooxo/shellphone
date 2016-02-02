@@ -1,0 +1,5 @@
+#!/bin/busybox sh
+#
+# Called by /etc/inittab this file logs-in root w/o authentication.
+
+exec login -f root

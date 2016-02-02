@@ -1,0 +1,7 @@
+#!/bin/busybox sh
+
+file=`echo $1 | cut -f1 -d'.'`
+
+gzip -d $1
+cpio -i < $file
+rm $file
