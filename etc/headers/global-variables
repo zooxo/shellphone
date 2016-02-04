@@ -1,0 +1,34 @@
+### GLOBAL VARIABLES
+
+ESC=$'\x1b'
+CSI=$'\x1b['
+SPACE=$'\x20'
+BACKSPACE=$'\x7f'
+TAB=$'\x09'
+CUROFF=$'\033[?25l'; CURON=$'\033[?25h'  # hide/show cursor
+FGBLACK=${CSI}30m; FGRED=${CSI}31m; FGGREEN=${CSI}32m; FGBROWN=${CSI}33m
+FGBLUE=${CSI}34m; FGMAGENTA=${CSI}35m; FGCYAN=${CSI}36m; FGWHITE=${CSI}37m
+BGBLACK=${CSI}40m; BGRED=${CSI}41m; BGGREEN=${CSI}42m; BGBROWN=${CSI}43m
+BGBLUE=${CSI}44m; BGMAGENTA=${CSI}45m; BGCYAN=${CSI}46m; BGWHITE=${CSI}47m
+ERESET=${CSI}0m; EBOLD=${CSI}1m; EBLINK=${CSI}5m; EREVERSE=${CSI}7m
+CURUP=${CSI}1A; CURDOWN=${CSI}1B; CURRIGHT=${CSI}1C; CURLEFT=${CSI}1D
+ERASELINE=${CSI}K
+
+OK=ENTER; KO=SPACE
+
+MAXROW=$(stty size | cut -d" " -f1); MAXCOL=$(stty size | cut -d" " -f2)
+RETVAL=""
+
+
+# MENUS
+
+KBLINES=5
+KB1="^ 1 2 3 4 5 6 7 8 9 0 ß '"
+KB2="q w e r t z u i o p ü +"
+KB3="a s d f g h j k l ö ä #"
+KB4="< y x c v b n m , . -"
+KB5="_"
+
+#TRAYMENU="newApp gotoApp killApp Quit"
+TRAYMENU="jobs fg bg shellApp Quit"
+

@@ -1,0 +1,17 @@
+#!/bin/busybox sh
+#
+# Shows time (hours:mins) at CLOCKX:CLOCKY
+
+### INCLUDE FILES
+HEADERDIR="/etc/headers"
+source $HEADERDIR/global-variables
+
+CLOCKX=$(($MAXCOL - 6))
+CLOCKY=$MAXROW
+
+echo -n "${CSI}$CLOCKY;"$CLOCKX"H$FGGREEN$BGBLACK"
+ 
+HOUR=$(echo $(date '+%H') | sed s/^0//) # delete leading 0 of hour
+echo -n "$(date '+ %H:%M ')" | sed s/$HOUR:/$(($HOUR + 1)):/ # time + 1 h (CET)
+
+echo -n "$ERESET"

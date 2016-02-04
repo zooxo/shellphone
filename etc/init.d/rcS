@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Called from /etc/inittab rcS populates/mounts necessary devices
+# and sets system basics (user, keymaps, ...).
+
+# Populate /dev
+mount -t devtmpfs none /dev
+#/bin/mdev -s
+
+# Mount /proc
+[ -f /proc/cmdline ] || /bin/mount /proc
+
+# Mount system devices from /etc/fstab
+/bin/mount -a
+
+## Start system
+# Load german keymap
+loadkmap < /usr/share/kmap/de-latin1.kmap
+# add user
+mkdir -p /home/u
+adduser -s /bin/sh -G user -D u
+echo u:u | /bin/chpasswd -m
+

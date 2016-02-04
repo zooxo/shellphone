@@ -1,0 +1,16 @@
+# Red by /bin/init inittab executes /etc/init.d/rcS
+# and respawn shells (primary a root autologin).
+
+
+# Run first the boottime script
+::sysinit:/etc/init.d/rcS
+
+# Respawn console(s)
+tty1::respawn:/bin/getty -nl /sbin/autologin 38400 tty1
+#tty2::respawn:/bin/getty 38400 tty2
+
+# Stuff to do when restarting
+::restart:/bin/init
+::ctrlaltdel:/bin/reboot
+::shutdown:/bin/umount -a -r
+::shutdown:/bin/swapoff -a
